@@ -1,0 +1,193 @@
+import requests
+import random
+import pandas as pd
+import time
+import matplotlib.pyplot as plt
+from io import BytesIO
+
+SQUARE_OPENAPI_KEY = "5bb8f42233e64a3eb1743b1088ad7644"
+SQUARE_POST_URL = "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add"
+BASE_URL = "https://fapi.binance.com"
+
+used_coins = set()
+
+# -----------------------------
+# Viral hooks
+# -----------------------------
+hooks = [
+    "🚨 THIS COIN IS ABOUT TO MOVE...",
+    "🔥 Nobody is talking about this yet...",
+    "👀 Smart money is watching this...",
+    "⚠️ This setup looks dangerous...",
+    "💎 Hidden gem spotted...",
+]
+
+hashtags = [
+    "#crypto", "#trading", "#bitcoin", "#altcoins",
+    "#binance", "#futures", "#cryptosignals", "#trader"
+]
+
+# -----------------------------
+def get_futures_symbols():
+    data = requests.get(BASE_URL + "/fapi/v1/exchangeInfo").json()
+    if "symbols" not in data:
+        print("❌ API error:", data)
+        return []
+    return [
+        s['symbol'] for s in data['symbols']
+        if s['contractType'] == 'PERPETUAL'
+        and s['quoteAsset'] == 'USDT'
+        and s['status'] == 'TRADING'
+    ]
+
+# -----------------------------
+def get_valid_random_symbol(symbols):
+    available = list(set(symbols) - used_coins)
+    if not available:
+        used_coins.clear()
+        available = symbols
+    symbol = random.choice(available)
+    used_coins.add(symbol)
+    return symbol
+
+# -----------------------------
+def get_klines(symbol, interval="15m", limit=200):
+    params = {"symbol": symbol, "interval": interval, "limit": limit}
+    data = requests.get(BASE_URL + "/fapi/v1/klines", params=params).json()
+
+    df = pd.DataFrame(data, columns=[
+        "time","open","high","low","close","volume",
+        "close_time","qav","trades","tbbav","tbqav","ignore"
+    ])
+
+    for col in ["close","high","low","volume"]:
+        df[col] = df[col].astype(float)
+
+    return df
+
+# -----------------------------
+def get_rsi(df, period=14):
+    delta = df["close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
+    rs = gain / loss
+    return (100 - (100 / (1 + rs))).iloc[-1]
+
+# -----------------------------
+def get_macd(df):
+    ema12 = df["close"].ewm(span=12).mean()
+    ema26 = df["close"].ewm(span=26).mean()
+    macd = ema12 - ema26
+    signal = macd.ewm(span=9).mean()
+    return macd.iloc[-1], signal.iloc[-1]
+
+# -----------------------------
+def get_trend(df):
+    ema20 = df["close"].ewm(span=20).mean().iloc[-1]
+    ema50 = df["close"].ewm(span=50).mean().iloc[-1]
+    return "LONG 🚀" if ema20 > ema50 else "SHORT 🔻"
+
+# -----------------------------
+def create_sparkline(df):
+    plt.figure(figsize=(4,1))
+    plt.plot(df["close"].iloc[-20:])
+    plt.axis('off')
+    buf = BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    plt.close()
+    buf.seek(0)
+    return buf
+
+# -----------------------------
+def generate_trade(symbol):
+    df = get_klines(symbol)
+
+    trend = get_trend(df)
+    rsi = get_rsi(df)
+    macd, signal = get_macd(df)
+
+    entry = df["close"].iloc[-1]
+    sl = entry * (0.97 if "LONG" in trend else 1.03)
+
+    risk = abs(entry - sl)
+    tp1 = entry + (risk*2 if "LONG" in trend else -risk*2)
+    tp2 = entry + (risk*3 if "LONG" in trend else -risk*3)
+
+    confidence = random.randint(70, 95)
+
+    # Hype seviyesi
+    if confidence > 90:
+        hype = "🚀 HIGH PROBABILITY SETUP"
+    elif confidence > 80:
+        hype = "🔥 STRONG SETUP"
+    else:
+        hype = "⚡ DECENT SETUP"
+
+    # Hook seç
+    hook = random.choice(hooks)
+
+    # Hashtag seç
+    tags = " ".join(random.sample(hashtags, 4))
+
+    coin = symbol.replace("USDT","")
+
+    message = f"""
+{hook}
+
+💰 ${coin}
+
+{hype}
+
+Trend: {trend}
+RSI: {round(rsi,2)}
+MACD: {round(macd,3)} / {round(signal,3)}
+
+Entry: {round(entry,4)}
+SL: {round(sl,4)}
+
+🎯 Targets:
+{round(tp1,4)} / {round(tp2,4)}
+
+Confidence: %{confidence}
+
+👇 What do you think?
+Long or Short?
+
+{tags}
+"""
+
+    return message, create_sparkline(df)
+
+# -----------------------------
+def post_to_square(message, chart):
+    headers = {
+        "X-Square-OpenAPI-Key": SQUARE_OPENAPI_KEY,
+        "Content-Type": "application/json"
+    }
+
+    payload = {"bodyTextOnly": message}
+
+    try:
+        r = requests.post(SQUARE_POST_URL, headers=headers, json=payload)
+        print("POST:", r.text)
+    except Exception as e:
+        print("Error:", e)
+
+# -----------------------------
+def run_bot():
+    symbols = get_futures_symbols()
+    print("Bot running...\n")
+
+    while True:
+        symbol = get_valid_random_symbol(symbols)
+
+        msg, chart = generate_trade(symbol)
+        print(msg)
+
+        post_to_square(msg, chart)
+
+        time.sleep(1500)
+
+# -----------------------------
+if __name__ == "__main__":
+    run_bot()

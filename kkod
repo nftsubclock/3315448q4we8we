@@ -5,7 +5,7 @@ import time
 import matplotlib.pyplot as plt
 from io import BytesIO
 
-SQUARE_OPENAPI_KEY = "5bb8f42233e64a3eb1743b1088ad7644"
+SQUARE_OPENAPI_KEY = ""
 SQUARE_POST_URL = "https://www.binance.com/bapi/composite/v1/public/pgc/openApi/content/add"
 BASE_URL = "https://fapi.binance.com"
 
